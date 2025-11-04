@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Game Leaderboard</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Dexie.js SDK Import (IndexedDB wrapper) - Loaded as a standard script -->
+    <script src="https://unpkg.com/dexie@3.2.3/dist/dexie.js"></script>
+    <!-- Use Inter font -->
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            /* Dark background for a gaming feel */
+            background-color: #1a202c; 
+        }
+        /* Custom styling for the top 3 ranks */
+        .rank-1 { background: linear-gradient(135deg, #FFD700 0%, #FFCC00 100%); color: #1a202c; font-size: 1.25rem; font-weight: 900; }
+        .rank-2 { background: linear-gradient(135deg, #C0C0C0 0%, #B0B0B0 100%); color: #1a202c; font-size: 1.2rem; font-weight: 800; }
+        .rank-3 { background: linear-gradient(135deg, #CD7F32 0%, #B87333 100%); color: #1a202c; font-size: 1.1rem; font-weight: 700; }
+
+        /* Dark table row styling */
+        .leaderboard-row { transition: background-color 0.15s; }
+        .leaderboard-row:hover { background-color: #3f4a5b !important; }
+        
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8">
+
+    <div id="app-container" class="max-w-4xl mx-auto">
+        <header class="text-center mb-10">
+            <h1 class="text-5xl font-extrabold text-[#FE9728] mb-2 drop-shadow-lg">Class Leaderboard </h1>
+            <p class="text-lg text-gray-300">
+                <span class="font-bold text-[#E34D91]">STATUS: LOCAL DATABASE ONLY.</span> New scores added every 3s.
+            </p>
+        </header>
+
+        <!-- Leaderboard Table Container -->
+        <div class="bg-[#2f3847] shadow-2xl rounded-xl border border-gray-700 overflow-hidden">
+            <div class="p-4 bg-[#394353] text-white flex justify-between items-center border-b border-gray-700">
+                <h2 class="text-2xl font-semibold">Top Players</h2>
+                <div id="status-message" class="text-sm font-medium text-green-400">Local DB Ready</div>
+            </div>
+            <div class="p-2 sm:p-6">
+                <table class="min-w-full divide-y divide-gray-700">
+                    <thead class="bg-[#3f4a5b]">
+                        <tr>
+                            <!-- Simplified headers: Rank, Name, Score only -->
+                            <th class="px-3 sm:px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wider w-1/6">RANK</th>
+                            <th class="px-3 sm:px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wider w-3/6">PLAYER NAME</th>
+                            <th class="px-3 sm:px-6 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wider w-2/6">SCORE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body" class="divide-y divide-gray-700 text-white">
+                        <!-- Leaderboard rows will be injected here by JavaScript -->
+                    </tbody>
+                </table>
+                <div id="loading-message" class="text-center py-8 text-lg text-gray-500 hidden">Loading Leaderboard...</div>
+                <div id="empty-message" class="text-center py-8 text-lg text-gray-500 hidden">No scores yet. Add a dummy score below!</div>
+            </div>
+        </div>
+        
+        <!-- Automated Data Generation Indicator -->
+        <div class="mt-8 p-6 bg-[#2f3847] shadow-2xl rounded-xl border-t-4 border-[#E34D91]">
+            <h3 class="text-xl font-bold text-gray-100 mb-2">Automated Score Feed Active</h3>
+            <p class="mt-2 text-sm text-gray-400">
+                The application is automatically generating and submitting random player scores every 3 seconds to demonstrate the real-time update capability.
+            </p>
+        </div>
+    </div>
+
+    <!-- Main JavaScript Logic -->
+    <script>
+        // --- GLOBAL SETUP ---
+
+        // Dexie is available globally.
+        
+        // 1. Define the local database schema
+        const db = new Dexie('GameLeaderboardDB');
+        db.version(1).stores({
+            scores: '++id, score, name, timestamp' 
+        });
+
+        // Intervals for polling (rendering) and score generation
+        const POLLING_INTERVAL_MS = 1000; 
+        const GENERATION_INTERVAL_MS = 3000; // New score every 3 seconds
+
+        // --- CORE APPLICATION LOGIC ---
+
+        function initApp() {
+            console.log("Using Dexie.js (IndexedDB) for local data storage.");
+            // 1. Seed the initial leaderboard with data
+            seedInitialData();
+            // 2. Start continuous score generation
+            startScoreGeneration();
+            // 3. Start polling for rendering
+            startLocalPolling();
+        }
+        
+        // --- DUMMY DATA CONTROL ---
+
+        function getRandomScore() {
+            // Generate scores between 5000 and 15000
+            return Math.floor(Math.random() * 10000) + 5000;
+        }
+
+        async function addRandomScore() {
+            const playerName = `Player-${Math.floor(Math.random() * 900) + 100}`;
+            const newScore = getRandomScore();
+            
+            const newScoreData = {
+                name: playerName,
+                score: newScore,
+                timestamp: new Date()
+            };
+
+            try {
+                // Write data to Dexie/IndexedDB
+                await db.scores.add(newScoreData);
+                console.log(`Local score added: ${playerName} (${newScore}).`);
+            } catch (e) {
+                console.error("Error adding document to Dexie:", e);
+            }
+        }
+
+        async function seedInitialData() {
+            const count = await db.scores.count();
+            if (count === 0) {
+                // Add 8 initial scores on first load
+                for (let i = 0; i < 8; i++) {
+                    await addRandomScore();
+                }
+            }
+        }
+
+        function startScoreGeneration() {
+            setInterval(addRandomScore, GENERATION_INTERVAL_MS); 
+        }
+
+        // --- LOCAL DATA LISTENER (Simulated Real-Time Polling) ---
+
+        function startLocalPolling() {
+            setInterval(fetchAndRenderLeaderboard, POLLING_INTERVAL_MS);
+            document.getElementById('loading-message').classList.remove('hidden');
+        }
+
+        async function fetchAndRenderLeaderboard() {
+            try {
+                // Fetch all scores, sort them by score descending
+                const leaderboardData = await db.scores
+                    .orderBy('score')
+                    .reverse() 
+                    .toArray();
+
+                if (leaderboardData.length === 0) {
+                    document.getElementById('empty-message').classList.remove('hidden');
+                    document.getElementById('leaderboard-body').innerHTML = '';
+                } else {
+                    document.getElementById('empty-message').classList.add('hidden');
+                    renderLeaderboard(leaderboardData);
+                }
+            } catch (error) {
+                console.error("Dexie/IndexedDB fetch failed:", error);
+            }
+        }
+        
+        function renderLeaderboard(data) {
+            const sortedData = data;
+            const tbody = document.getElementById('leaderboard-body');
+            tbody.innerHTML = ''; 
+            
+            sortedData.forEach((item, index) => {
+                const rank = index + 1;
+                
+                // Determine CSS class for the row based on rank
+                let rankClass = '';
+                let nameStyle = 'text-gray-100 font-normal';
+                let scoreStyle = 'text-[#FE9728] font-bold';
+
+                if (rank === 1) {
+                    rankClass = 'rank-1';
+                    nameStyle = 'text-[#1a202c] font-extrabold';
+                    scoreStyle = 'text-[#1a202c] font-extrabold';
+                } else if (rank === 2) {
+                    rankClass = 'rank-2';
+                    nameStyle = 'text-[#1a202c] font-extrabold';
+                    scoreStyle = 'text-[#1a202c] font-extrabold';
+                } else if (rank === 3) {
+                    rankClass = 'rank-3';
+                    nameStyle = 'text-[#1a202c] font-extrabold';
+                    scoreStyle = 'text-[#1a202c] font-extrabold';
+                }
+
+                const row = `
+                    <tr class="leaderboard-row border-gray-700 ${rank % 2 === 0 ? 'bg-[#333d4b]' : 'bg-[#2f3847]'} ${rankClass}">
+                        <td class="px-3 sm:px-6 py-4 whitespace-nowrap text-center text-sm">
+                            ${rankClass ? rank : `<span class="text-gray-400">${rank}</span>`}
+                        </td>
+                        <td class="px-3 sm:px-6 py-4 whitespace-nowrap text-sm ${nameStyle}">
+                            ${item.name}
+                        </td>
+                        <td class="px-3 sm:px-6 py-4 whitespace-nowrap text-lg ${scoreStyle}">
+                            ${item.score.toLocaleString()}
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+
+            document.getElementById('loading-message').classList.add('hidden');
+        }
+
+        // Initialize the application on load
+        window.onload = initApp;
+    </script>
+</body>
+</html>
